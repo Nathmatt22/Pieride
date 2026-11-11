@@ -3,7 +3,9 @@ name: Release
 # Lancement manuel depuis Actions > Release > Run workflow, sur une branche
 # release/* uniquement. Il faut d'abord créer sur GitHub une release en brouillon
 # dont le tag est v + la version de package.json (ex. v0.2.0 ou v1.0.0).
-# Tests, puis builds dans le brouillon, puis publication si tout a réussi et annonce Discord.
+# Tests, puis builds dans le brouillon. Chaque build publie la release dès que ses
+# artefacts sont prêts, sans attendre les autres OS ; les suivants s'ajoutent à la
+# release publiée. Annonce Discord à la fin, si au moins un artefact a été publié.
 on:
   workflow_dispatch:
 
@@ -65,7 +67,7 @@ jobs:
     permissions:
       contents: write
     strategy:
-      fail-fast: true
+      fail-fast: false
       matrix:
         include:
           - name: Windows x64
@@ -125,17 +127,38 @@ jobs:
           releaseId: ${{ needs.prepare.outputs.release_id }}
           args: --target ${{ matrix.target }} --bundles ${{ matrix.bundles }}
 
+      # Dès qu'un OS a fini d'uploader ses installeurs, la release devient publique.
+      # Les autres jobs ajoutent leurs artefacts à cette release déjà publiée.
+      - name: Publier la release dès qu'un build est prêt
+        shell: bash
+        env:
+          GH_TOKEN: ${{ github.token }}
+          RELEASE_ID: ${{ needs.prepare.outputs.release_id }}
+        run: |
+          if [ "$(gh api "repos/$GITHUB_REPOSITORY/releases/$RELEASE_ID" --jq '.draft')" = "true" ]; then
+            gh api -X PATCH "repos/$GITHUB_REPOSITORY/releases/$RELEASE_ID" -F draft=false
+          fi
+
   publish:
-    name: Publier la release
+    name: Vérifier la publication
     needs: [prepare, build]
+    # Tourne même si un OS échoue : la release doit rester publiée dès qu'un artefact existe.
+    if: always() && needs.prepare.result == 'success'
     runs-on: ubuntu-24.04
     permissions:
       contents: write
     steps:
-      - env:
+      - name: Publier la release si au moins un artefact est prêt
+        env:
           GH_TOKEN: ${{ github.token }}
           RELEASE_ID: ${{ needs.prepare.outputs.release_id }}
-        run: gh api -X PATCH "repos/$GITHUB_REPOSITORY/releases/$RELEASE_ID" -F draft=false
+        run: |
+          assets="$(gh api "repos/$GITHUB_REPOSITORY/releases/$RELEASE_ID/assets" --jq 'length')"
+          if [ "$assets" -eq 0 ]; then
+            echo "::error::Aucun artefact n'a été publié : la release reste en brouillon."
+            exit 1
+          fi
+          gh api -X PATCH "repos/$GITHUB_REPOSITORY/releases/$RELEASE_ID" -F draft=false
 
   # Pas de workflow `on: release` : une publication par GITHUB_TOKEN ne le lancerait pas
   notify:
