@@ -992,6 +992,44 @@
         "WrongPin": "That PIN isn't right.",
         "AlreadyLinked": "This account is already in Piéride. Choose it at the top of the sidebar."
       }
+    },
+    "skolengo": {
+      "eyebrow": "Sign in to Skolengo",
+      "searchTitle": "Pick your school",
+      "searchText": "Type the name of your Skolengo school or ENT.",
+      "searchPlaceholder": "School name",
+      "searching": "Looking for schools…",
+      "searchFailed": "Search isn't responding right now. Try again in a moment.",
+      "noSchool": "No Skolengo school matches this search.",
+      "loginEyebrow": "Sign in",
+      "loginTitle": "Sign in to {{name}}",
+      "loginText": "Your ENT's sign-in page opens in a separate window. Sign in as usual.",
+      "safeTitle": "Your password stays private",
+      "safeText": "Piéride isn't affiliated with Skolengo or your ENT. The page opens in a secure window: Piéride never reads or keeps your password.",
+      "open": "Open the sign-in page",
+      "retry": "Try again",
+      "waiting": "Sign in in the window that just opened.",
+      "closed": "The window was closed before you finished signing in.",
+      "windowTitle": "Sign in to Skolengo",
+      "syncTitle": "Signing in…",
+      "syncText": "This may take a moment.",
+      "steps": {
+        "login": "Signing in to Skolengo",
+        "TIMETABLE": "Getting your timetable",
+        "GRADES": "Getting your grades",
+        "HOMEWORK": "Getting your homework"
+      },
+      "done": "Done",
+      "errors": {
+        "login_open": "The sign-in window is already open.",
+        "login_window": "The sign-in window couldn't open.",
+        "invalid_title": "The sign-in window couldn't open.",
+        "login_denied": "Your ENT refused the sign-in.",
+        "AuthenticationError": "Skolengo refused the sign-in. Try again.",
+        "ServiceUnavailable": "Skolengo isn't responding right now. Try again in a moment.",
+        "ParentAccount": "Skolengo parent accounts aren't supported by Piéride yet.",
+        "AlreadyLinked": "This account is already in Piéride. Choose it at the top of the sidebar."
+      }
     }
   },
   "whatsNew": {

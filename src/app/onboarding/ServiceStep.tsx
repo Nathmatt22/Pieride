@@ -1,5 +1,5 @@
-// Service scolaire. PRONOTE et le compte hors ligne sont disponibles ; les autres services
-// arrivent en M4.
+// Service scolaire. PRONOTE, Skolengo et le compte hors ligne sont disponibles ; les autres
+// services arrivent en M4.
 import {
   Ecoledirecte,
   GraduationHat,
@@ -16,9 +16,11 @@ import styles from "./onboarding.module.scss";
 
 export function ServiceStep({
   onPronote,
+  onSkolengo,
   onOffline,
 }: {
   onPronote: () => void;
+  onSkolengo: () => void;
   onOffline: () => void;
 }) {
   const { t } = useTranslation();
@@ -46,7 +48,7 @@ export function ServiceStep({
           icon={Skolengo}
           title={SERVICE_NAMES.skolengo}
           text={t("onboarding.service.skolengo")}
-          disabledLabel={soon}
+          onClick={onSkolengo}
         />
       </div>
 

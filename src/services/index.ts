@@ -8,6 +8,8 @@ import { AccountManager } from "./account-manager";
 export const accountManager = new AccountManager(db, {
   pronote: async (...args) =>
     (await import("./pronote")).connectPronote(...args),
+  skolengo: async (...args) =>
+    (await import("./skolengo")).connectSkolengo(...args),
   ...(import.meta.env.DEV
     ? {
         mock: async (...args) => (await import("./mock")).connectMock(...args),

@@ -992,6 +992,44 @@
         "WrongPin": "Ce code PIN n'est pas le bon.",
         "AlreadyLinked": "Ce compte est déjà dans Piéride. Choisis-le en haut de la barre latérale."
       }
+    },
+    "skolengo": {
+      "eyebrow": "Connexion à Skolengo",
+      "searchTitle": "Choisis ton établissement",
+      "searchText": "Tape le nom de ton établissement ou de ton ENT Skolengo.",
+      "searchPlaceholder": "Nom de l'établissement",
+      "searching": "Recherche des établissements…",
+      "searchFailed": "La recherche ne répond pas pour l'instant. Réessaie dans un instant.",
+      "noSchool": "Aucun établissement Skolengo ne correspond à cette recherche.",
+      "loginEyebrow": "Connexion",
+      "loginTitle": "Connecte-toi à {{name}}",
+      "loginText": "La page de connexion de ton ENT s'ouvre dans une fenêtre à part. Connecte-toi comme d'habitude.",
+      "safeTitle": "Ton mot de passe reste privé",
+      "safeText": "Piéride n'est affilié ni à Skolengo ni à ton ENT. La page s'ouvre dans une fenêtre sécurisée : ton mot de passe n'est ni lu ni gardé par Piéride.",
+      "open": "Ouvrir la page de connexion",
+      "retry": "Réessayer",
+      "waiting": "Connecte-toi dans la fenêtre qui vient de s'ouvrir.",
+      "closed": "La fenêtre a été fermée avant la fin de la connexion.",
+      "windowTitle": "Connexion à Skolengo",
+      "syncTitle": "Connexion en cours…",
+      "syncText": "Cela peut prendre quelques instants.",
+      "steps": {
+        "login": "Connexion à Skolengo",
+        "TIMETABLE": "Récupération de l'emploi du temps",
+        "GRADES": "Récupération des notes",
+        "HOMEWORK": "Récupération des devoirs"
+      },
+      "done": "Terminé",
+      "errors": {
+        "login_open": "La fenêtre de connexion est déjà ouverte.",
+        "login_window": "La fenêtre de connexion n'a pas pu s'ouvrir.",
+        "invalid_title": "La fenêtre de connexion n'a pas pu s'ouvrir.",
+        "login_denied": "La connexion a été refusée par ton ENT.",
+        "AuthenticationError": "Skolengo a refusé la connexion. Réessaie.",
+        "ServiceUnavailable": "Skolengo ne répond pas pour l'instant. Réessaie dans un instant.",
+        "ParentAccount": "Les comptes parents Skolengo ne sont pas encore pris en charge par Piéride.",
+        "AlreadyLinked": "Ce compte est déjà dans Piéride. Choisis-le en haut de la barre latérale."
+      }
     }
   },
   "whatsNew": {

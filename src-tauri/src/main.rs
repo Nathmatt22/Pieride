@@ -5,6 +5,7 @@ mod attachments;
 mod database;
 mod pronote_login;
 mod secrets;
+mod skolengo_login;
 
 use std::{collections::HashSet, sync::Mutex};
 
@@ -151,6 +152,7 @@ fn main() {
         .invoke_handler(tauri::generate_handler![
             allow_instance,
             pronote_login::pronote_login,
+            skolengo_login::skolengo_login,
             show_app,
             is_minimized,
             can_self_update,

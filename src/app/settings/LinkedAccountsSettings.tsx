@@ -120,18 +120,26 @@ export function LinkedAccountsSettings({
               service => SERVICE_GROUPS[service.kind] === "school"
             );
             const needsLogin = school.some(service => service.needsLogin);
-            // Seul PRONOTE sait se reconnecter pour l'instant.
-            const refused = school.find(
-              service => service.needsLogin && service.kind === "pronote"
-            );
-            const relink: AddAccountStart | null = refused?.instanceUrl
-              ? {
-                  accountId: candidate.id,
-                  serviceId: refused.id,
-                  url: refused.instanceUrl,
-                  name: candidate.schoolName ?? SERVICE_NAMES.pronote,
-                }
-              : null;
+            const refused = school.find(service => service.needsLogin);
+            const relink: AddAccountStart | null =
+              refused?.instanceUrl === undefined
+                ? null
+                : refused.kind === "skolengo"
+                  ? {
+                      kind: "skolengo",
+                      accountId: candidate.id,
+                      serviceId: refused.id,
+                      name: SERVICE_NAMES.skolengo,
+                    }
+                  : refused.kind === "pronote"
+                    ? {
+                        kind: "pronote",
+                        accountId: candidate.id,
+                        serviceId: refused.id,
+                        url: refused.instanceUrl,
+                        name: candidate.schoolName ?? SERVICE_NAMES.pronote,
+                      }
+                    : null;
             return (
               <SettingRow
                 key={candidate.id}
