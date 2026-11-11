@@ -5,6 +5,7 @@ fn main() {
         tauri_build::AppManifest::new().commands(&[
             "allow_instance",
             "pronote_login",
+            "skolengo_login",
             "show_app",
             "is_minimized",
             "can_self_update",
