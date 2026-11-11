@@ -24,11 +24,7 @@ type Result<T> = std::result::Result<T, &'static str>;
 /// titre traduit. Les erreurs sont des codes : `invalid_url`, `invalid_title`, `login_open`
 /// (une connexion est déjà ouverte) ou `login_window`.
 #[tauri::command]
-pub async fn skolengo_login(
-    app: AppHandle,
-    url: String,
-    title: String,
-) -> Result<Option<Value>> {
+pub async fn skolengo_login(app: AppHandle, url: String, title: String) -> Result<Option<Value>> {
     instance_origin(&url)?;
     let target = Url::parse(&url).map_err(|_| "invalid_url")?;
     if title.is_empty() || title.chars().count() > 100 {
