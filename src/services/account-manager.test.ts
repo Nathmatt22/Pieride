@@ -309,6 +309,31 @@ describe("AccountManager", () => {
     expect(await db.select().from(courses)).toHaveLength(1);
   });
 
+  it("garde les cours d'une semaine quand les devoirs échouent", async () => {
+    const { db, manager } = await setup();
+    const nextWeek = new Date(2026, 10, 4, 12);
+    const monday = new Date(2026, 10, 2);
+    connect.mockImplementationOnce(async () => ({
+      kind: "pronote",
+      capabilities: {
+        TIMETABLE: {
+          getWeeklyTimetable: async () => [course("lundi-suivant", monday)],
+        },
+        HOMEWORK: {
+          getHomeworks: async () => {
+            throw new ServiceUnavailable("devoirs indisponibles");
+          },
+          setHomeworkCompletion: async () => undefined,
+        },
+      },
+    }));
+
+    expect(await manager.loadWeek("camille", nextWeek, NOW)).toBe(true);
+    expect((await db.select().from(courses)).map(item => item.id)).toEqual([
+      "lundi-suivant",
+    ]);
+  });
+
   it("reconnecte un service refusé avec son nouveau secret", async () => {
     const { db, manager } = await setup();
     timetable = async () => {

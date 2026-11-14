@@ -6,16 +6,19 @@ import {
   AttendanceItemType,
   type Lesson,
   type News as SkolengoNews,
+  Permissions,
 } from "skolengojs";
-import { describe, expect, it } from "vitest";
+import { describe, expect, it, vi } from "vitest";
 
 import {
   attendancePeriod,
+  capabilities,
   toAttendance,
   toCourse,
   toHomework,
   toNews,
 } from "./data";
+import type { SkolengoSession } from "./session";
 
 const lesson = (overrides: Partial<Lesson> = {}) =>
   ({
@@ -42,6 +45,23 @@ describe("toCourse", () => {
 
   it("signale un cours annulé", () => {
     expect(toCourse(lesson({ canceled: true })).status).toBe("canceled");
+  });
+});
+
+describe("capabilities TIMETABLE", () => {
+  it("demande la semaine du lundi au dimanche", async () => {
+    const getTimetable = vi.fn(async () => []);
+    const session = {
+      run: async <T>(
+        request: (client: { GetTimetable: typeof getTimetable }) => Promise<T>
+      ) => request({ GetTimetable: getTimetable }),
+    } as unknown as SkolengoSession;
+    const methods = capabilities(session, [Permissions.READ_LESSONS]);
+    const monday = new Date(2026, 10, 16);
+
+    await methods.TIMETABLE?.getWeeklyTimetable(monday);
+
+    expect(getTimetable).toHaveBeenCalledWith(monday, new Date(2026, 10, 22));
   });
 });
 

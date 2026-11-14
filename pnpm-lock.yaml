@@ -164,7 +164,7 @@ settings:
 
 patchedDependencies:
   '@blockshub/pawnote-lts@1.6.4': d152916fef4920163bf8ad4b7eab29bfe0be59c06f06990a690101c7df351d3d
-  skolengojs@1.2.2: ba34d603e8433b45e6d81a67f8da877a849100aea7b9bb3910a55dd68c3e5e0f
+  skolengojs@1.2.2: 68b0aa516a41c93f7df0d62c2bce3fa44330f19df29065ccdd729f64f7a28600
 
 importers:
 
@@ -220,7 +220,7 @@ importers:
         version: 8.5.0(@types/react-dom@19.3.0(@types/react@19.3.0))(@types/react@19.3.0)(react-dom@19.3.1(react@19.3.1))(react@19.3.1)
       skolengojs:
         specifier: ^1.2.2
-        version: 1.2.2(patch_hash=ba34d603e8433b45e6d81a67f8da877a849100aea7b9bb3910a55dd68c3e5e0f)(eslint@10.13.0(supports-color@8.1.1))(supports-color@8.1.1)(typescript@6.0.3)
+        version: 1.2.2(patch_hash=68b0aa516a41c93f7df0d62c2bce3fa44330f19df29065ccdd729f64f7a28600)(eslint@10.13.0(supports-color@8.1.1))(supports-color@8.1.1)(typescript@6.0.3)
       zustand:
         specifier: ^5.0.16
         version: 5.0.16(@types/react@19.3.0)(react@19.3.1)(use-sync-external-store@1.7.0(react@19.3.1))
@@ -4852,7 +4852,7 @@ snapshots:
 
   shell-quote@1.12.0: {}
 
-  skolengojs@1.2.2(patch_hash=ba34d603e8433b45e6d81a67f8da877a849100aea7b9bb3910a55dd68c3e5e0f)(eslint@10.13.0(supports-color@8.1.1))(supports-color@8.1.1)(typescript@6.0.3):
+  skolengojs@1.2.2(patch_hash=68b0aa516a41c93f7df0d62c2bce3fa44330f19df29065ccdd729f64f7a28600)(eslint@10.13.0(supports-color@8.1.1))(supports-color@8.1.1)(typescript@6.0.3):
     dependencies:
       '@noble/hashes': 1.8.0
       '@scure/base': 1.2.6

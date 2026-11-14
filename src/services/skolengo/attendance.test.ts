@@ -12,7 +12,7 @@ describe("GetAttendanceItems", () => {
     vi.unstubAllGlobals();
   });
 
-  it("demande les absences et les retards avec le type LATENESS", async () => {
+  it("demande les absences et retards sans filtre invalide", async () => {
     const fetchMock = vi.fn(
       async (_input: RequestInfo | URL, _init?: RequestInit) => emptyResponse()
     );
@@ -25,7 +25,10 @@ describe("GetAttendanceItems", () => {
     const url = decodeURIComponent(
       input instanceof Request ? input.url : String(input)
     );
-    expect(url).toContain("filter[currentState.absenceType]=ABSENCE,LATENESS");
+    expect(url).toContain("filter[student.id]=student-id");
+    expect(url).toContain("include=currentState");
+    expect(url).not.toContain("filter[currentState.absenceType]");
+    expect(url).not.toContain("filter[absenceFile]");
     expect(url).not.toContain("CLATENESS");
   });
 });

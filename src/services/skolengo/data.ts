@@ -257,7 +257,7 @@ export function capabilities(
     getWeeklyTimetable: weekStart =>
       session.run(async client => {
         const to = addDays(weekStart, 7);
-        const days = await client.GetTimetable(weekStart, to);
+        const days = await client.GetTimetable(weekStart, addDays(to, -1));
         return days
           .flatMap(day => day.lessons.map(toCourse))
           .filter(course => course.from >= weekStart && course.from < to);
@@ -268,7 +268,7 @@ export function capabilities(
     getHomeworks: weekStart =>
       session.run(async client => {
         const to = addDays(weekStart, 7);
-        const found = await client.GetAssignments(weekStart, to);
+        const found = await client.GetAssignments(weekStart, addDays(to, -1));
         const list: Homework[] = [];
         // L'un après l'autre : chaque devoir a sa requête de pièces jointes.
         for (const assignment of found) {

@@ -511,13 +511,30 @@ export class AccountManager {
   ): Promise<boolean> {
     const plugin = await this.plugin(service);
     const writes: Write[] = [];
+    let failed: unknown;
     for (const capability of WEEKLY) {
-      writes.push(
-        ...((await this.fetch(plugin, service.id, capability, monday)) ?? [])
-      );
+      try {
+        const next = await this.fetch(plugin, service.id, capability, monday);
+        if (next) {
+          writes.push(...next);
+        }
+      } catch (error) {
+        if (error instanceof AuthenticationError) {
+          throw error;
+        }
+        failed ??= error;
+        log(
+          "warn",
+          "sync",
+          `${service.kind} ${capability} semaine : ${errorKind(error)}`
+        );
+      }
     }
     const [first, ...rest] = writes;
     if (!first) {
+      if (failed) {
+        throw failed;
+      }
       return false;
     }
     await this.db.batch([first, ...rest]);
