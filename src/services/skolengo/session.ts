@@ -61,8 +61,9 @@ export function toServiceError(error: unknown): unknown {
     return error;
   }
   if (error instanceof Error) {
+    // 403 : le jeton est valide mais ce module est interdit, ce n'est pas une reconnexion.
     if (
-      /^(400|401|403)\b/.test(error.message) ||
+      /^(400|401)\b/.test(error.message) ||
       /invalid_grant|invalid_token|unauthorized/i.test(error.message)
     ) {
       return new AuthenticationError("Skolengo a refusé la connexion");

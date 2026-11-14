@@ -176,6 +176,30 @@ describe("absence et retard", () => {
     ).toMatchObject({ kind: "delay", reason: undefined, justified: false });
   });
 
+  it("reste disponible sans droit annoncé et ignore les dates invalides", async () => {
+    const valid = item({});
+    const invalid = item({
+      id: "ESKO-A-INVALIDE",
+      startDate: new Date(""),
+      endDate: new Date(""),
+    });
+    const session = {
+      run: async <T>(
+        request: (client: {
+          GetAttendanceItems: () => Promise<AttendanceItem[]>;
+        }) => Promise<T>
+      ) => request({ GetAttendanceItems: async () => [valid, invalid] }),
+    } as unknown as SkolengoSession;
+    const methods = capabilities(session, []).ATTENDANCE;
+
+    expect(methods).toBeDefined();
+    const [period] = await methods!.getAttendancePeriods();
+    expect(period).toBeDefined();
+    expect(
+      (await methods!.getAttendanceForPeriod(period!)).map(({ id }) => id)
+    ).toEqual(["ESKO-A-1"]);
+  });
+
   it("couvre les absences reçues, ou l'année scolaire sans aucune", () => {
     const period = attendancePeriod([
       item({ startDate: new Date("2026-10-01T08:00:00Z") }),

@@ -39,6 +39,13 @@ const positive = (value: number | undefined) => {
 
 const joined = (names: readonly string[]) => names.join(", ") || undefined;
 
+/** Une absence sans dates exploitables ne doit pas faire échouer l'enregistrement des autres. */
+const validAttendance = (item: AttendanceItem) => {
+  const start = item.startDate.getTime();
+  const end = item.endDate.getTime();
+  return Number.isFinite(start) && Number.isFinite(end) && end >= start;
+};
+
 export function toCourse(lesson: Lesson): Course {
   return {
     // Un cours qui revient chaque semaine garde son identifiant : l'heure de début en fait
@@ -243,7 +250,8 @@ export function attendancePeriod(
 
 /**
  * Les capabilities des droits ouverts à l'élève. Les actualités ne dépendent d'aucun droit
- * dans l'API : elles sont toujours proposées, comme dans Papillon.
+ * dans l'API : elles sont toujours proposées, comme dans Papillon. Les absences aussi :
+ * l'API refuse elle-même l'accès si l'établissement ne l'autorise pas.
  */
 export function capabilities(
   session: SkolengoSession,
@@ -329,6 +337,7 @@ export function capabilities(
         client.GetAttendanceItems()
       );
       return attendanceItems
+        .filter(validAttendance)
         .filter(
           item => item.startDate >= period.start && item.startDate <= period.end
         )
@@ -341,8 +350,8 @@ export function capabilities(
     ...(allowed.has(Permissions.READ_ASSIGNMENTS) && { HOMEWORK: homework }),
     ...(allowed.has(Permissions.READ_EVALUATIONS) && { GRADES: grades }),
     NEWS: news,
-    ...(allowed.has(Permissions.READ_ABSENCE_FILES) && {
-      ATTENDANCE: attendance,
-    }),
+    // L'API refuse elle-même l'accès : on demande toujours, comme Papillon, pour ne pas
+    // dépendre d'un droit que certains établissements n'annoncent pas dans `permissions`.
+    ATTENDANCE: attendance,
   };
 }

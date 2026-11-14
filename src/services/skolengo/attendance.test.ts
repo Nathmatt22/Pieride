@@ -27,8 +27,11 @@ describe("GetAttendanceItems", () => {
     );
     expect(url).toContain("filter[student.id]=student-id");
     expect(url).toContain("include=currentState");
+    expect(url).toContain("page[limit]=20");
+    expect(url).toContain("page[offset]=0");
     expect(url).not.toContain("filter[currentState.absenceType]");
     expect(url).not.toContain("filter[absenceFile]");
+    expect(url).not.toContain("fields[absenceFileState]");
     expect(url).not.toContain("CLATENESS");
   });
 });

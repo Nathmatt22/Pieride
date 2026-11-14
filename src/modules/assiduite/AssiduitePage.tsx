@@ -42,7 +42,9 @@ export function AssiduitePage({ module }: ModulePageProps) {
   const now = useNow();
   const items = useAttendance(accountId);
   const grades = useGrades(accountId);
-  const [chosen, setChosen] = useState<string | null>(null);
+  // Toute l'année d'abord : une absence du trimestre précédent resterait sinon invisible
+  // tant que la période de notes en cours n'en contient aucune.
+  const [chosen, setChosen] = useState<string | null>("year");
   const [filter, setFilter] = useState<Filter>("all");
   const [selected, setSelected] = useState<string | null>(null);
 
