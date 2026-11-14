@@ -1,12 +1,12 @@
 name: Release
 
-# Lancement manuel depuis Actions > Release > Run workflow, sur une branche
-# release/* uniquement. Il faut d'abord créer sur GitHub une release en brouillon
-# dont le tag est v + la version de package.json (ex. v0.2.0 ou v1.0.0).
-# Tests, puis builds dans le brouillon. Chaque build publie la release dès que ses
-# artefacts sont prêts, sans attendre les autres OS ; les suivants s'ajoutent à la
-# release publiée. Annonce Discord à la fin, si au moins un artefact a été publié.
+# Automatique : chaque CI verte sur main crée une release versionnée et la publie
+# dès qu'un OS a fini ses installeurs, sans attendre les autres. Lancement manuel
+# possible depuis Actions > Release > Run workflow.
 on:
+  workflow_run:
+    workflows: ["CI"]
+    types: [completed]
   workflow_dispatch:
 
 permissions:
@@ -17,53 +17,62 @@ concurrency:
   cancel-in-progress: false
 
 jobs:
-  ci:
-    uses: ./.github/workflows/ci.yml
-
   prepare:
     name: Préparer la release
+    if: github.event_name == 'workflow_dispatch' || (github.event.workflow_run.conclusion == 'success' && github.event.workflow_run.head_branch == 'main')
     runs-on: ubuntu-24.04
     permissions:
       contents: write
     outputs:
       release_id: ${{ steps.release.outputs.id }}
+      version: ${{ steps.release.outputs.version }}
+      tag: ${{ steps.release.outputs.tag }}
+      sha: ${{ steps.release.outputs.sha }}
     steps:
       - uses: actions/checkout@v7
         with:
+          ref: ${{ github.event.workflow_run.head_sha || github.sha }}
           persist-credentials: false
 
-      - name: Retrouver le brouillon et le fixer sur ce commit
+      - name: Calculer la version et créer la release
         id: release
         env:
           GH_TOKEN: ${{ github.token }}
+          SHA: ${{ github.event.workflow_run.head_sha || github.sha }}
+          RUN: ${{ github.event.workflow_run.run_number || github.run_number }}
+          ATTEMPT: ${{ github.event.workflow_run.run_attempt || github.run_attempt }}
         run: |
-          if [[ "$GITHUB_REF" != refs/heads/release/* ]]; then
-            echo "::error::Lance le workflow depuis une branche release/*, pas depuis $GITHUB_REF_NAME."
-            exit 1
+          set -euo pipefail
+          base="$(node -p 'require("./package.json").version.split("-")[0]')"
+          version="${base}-beta.${RUN}.${ATTEMPT}"
+          tag="v${version}"
+
+          id="$(gh api "repos/$GITHUB_REPOSITORY/releases?per_page=100" \
+            --jq "first(.[] | select(.tag_name == \"$tag\") | .id) // empty")"
+
+          if [ -z "$id" ]; then
+            id="$(gh api -X POST "repos/$GITHUB_REPOSITORY/releases" \
+              -f tag_name="$tag" \
+              -f target_commitish="$SHA" \
+              -f name="$tag" \
+              -F draft=true \
+              -F prerelease=false \
+              -F generate_release_notes=true \
+              --jq '.id')"
+          elif [ "$(gh api "repos/$GITHUB_REPOSITORY/releases/$id" --jq '.draft')" = "true" ]; then
+            # Réexécution : on refixe le brouillon sur le commit testé.
+            gh api -X PATCH "repos/$GITHUB_REPOSITORY/releases/$id" -f target_commitish="$SHA" > /dev/null
           fi
 
-          tag="v$(node -p 'require("./package.json").version')"
-
-          if gh api "repos/$GITHUB_REPOSITORY/git/ref/tags/$tag" > /dev/null 2>&1; then
-            echo "::error::Le tag $tag existe déjà. Augmente la version dans package.json."
-            exit 1
-          fi
-
-          id="$(gh api --paginate "repos/$GITHUB_REPOSITORY/releases" \
-            --jq ".[] | select(.draft and .tag_name == \"$tag\") | .id" | head -n 1)"
-          if [[ -z "$id" ]]; then
-            echo "::error::Aucune release en brouillon avec le tag $tag. Crée-la sur GitHub (Save draft) puis relance."
-            exit 1
-          fi
-
-          # Le tag sera créé à la publication, sur le commit testé ici
-          gh api -X PATCH "repos/$GITHUB_REPOSITORY/releases/$id" -f target_commitish="$GITHUB_SHA" > /dev/null
-          echo "Brouillon $tag ($id) fixé sur $GITHUB_SHA"
+          echo "Release $tag ($id) sur $SHA"
           echo "id=$id" >> "$GITHUB_OUTPUT"
+          echo "version=$version" >> "$GITHUB_OUTPUT"
+          echo "tag=$tag" >> "$GITHUB_OUTPUT"
+          echo "sha=$SHA" >> "$GITHUB_OUTPUT"
 
   build:
     name: Build ${{ matrix.name }}
-    needs: [ci, prepare]
+    needs: prepare
     permissions:
       contents: write
     strategy:
@@ -100,7 +109,9 @@ jobs:
     steps:
       - uses: actions/checkout@v7
         with:
+          ref: ${{ needs.prepare.outputs.sha }}
           persist-credentials: false
+
       - name: Dépendances système de Tauri
         if: runner.os == 'Linux'
         run: |
@@ -118,14 +129,49 @@ jobs:
         with:
           workspaces: src-tauri
       - run: pnpm install --frozen-lockfile
+
+      # Après setup-node : `node` est garanti disponible, y compris sur Windows arm64.
+      - name: Définir la version de la release
+        shell: bash
+        env:
+          RELEASE_VERSION: ${{ needs.prepare.outputs.version }}
+        run: |
+          set -euo pipefail
+          node -e 'const fs = require("fs"); const pkg = require("./package.json"); pkg.version = process.env.RELEASE_VERSION; fs.writeFileSync("package.json", JSON.stringify(pkg, null, 2) + "\n")'
+
+      # Sans clé de signature (fréquent sur un fork), on désactive les artefacts
+      # de mise à jour pour que les installeurs soient quand même produits.
+      - name: Configurer la signature
+        id: signing
+        shell: bash
+        env:
+          SIGNING_KEY: ${{ secrets.TAURI_SIGNING_PRIVATE_KEY }}
+          SIGNING_PASSWORD: ${{ secrets.TAURI_SIGNING_PRIVATE_KEY_PASSWORD }}
+        run: |
+          set -euo pipefail
+          if [ -z "$SIGNING_KEY" ]; then
+            printf '%s\n' '{"bundle":{"createUpdaterArtifacts":false}}' > src-tauri/tauri.unsigned.json
+            echo "config=--config src-tauri/tauri.unsigned.json" >> "$GITHUB_OUTPUT"
+            echo "Signature absente : artefacts de mise à jour désactivés."
+          else
+            {
+              echo "TAURI_SIGNING_PRIVATE_KEY<<TAURI_KEY_EOF"
+              echo "$SIGNING_KEY"
+              echo "TAURI_KEY_EOF"
+              echo "TAURI_SIGNING_PRIVATE_KEY_PASSWORD<<TAURI_PASSWORD_EOF"
+              echo "$SIGNING_PASSWORD"
+              echo "TAURI_PASSWORD_EOF"
+            } >> "$GITHUB_ENV"
+            echo "config=" >> "$GITHUB_OUTPUT"
+            echo "Signature configurée."
+          fi
+
       - uses: tauri-apps/tauri-action@v1
         env:
           GITHUB_TOKEN: ${{ github.token }}
-          TAURI_SIGNING_PRIVATE_KEY: ${{ secrets.TAURI_SIGNING_PRIVATE_KEY }}
-          TAURI_SIGNING_PRIVATE_KEY_PASSWORD: ${{ secrets.TAURI_SIGNING_PRIVATE_KEY_PASSWORD }}
         with:
           releaseId: ${{ needs.prepare.outputs.release_id }}
-          args: --target ${{ matrix.target }} --bundles ${{ matrix.bundles }}
+          args: --target ${{ matrix.target }} --bundles ${{ matrix.bundles }} ${{ steps.signing.outputs.config }}
 
       # Dès qu'un OS a fini d'uploader ses installeurs, la release devient publique.
       # Les autres jobs ajoutent leurs artefacts à cette release déjà publiée.
@@ -135,6 +181,7 @@ jobs:
           GH_TOKEN: ${{ github.token }}
           RELEASE_ID: ${{ needs.prepare.outputs.release_id }}
         run: |
+          set -euo pipefail
           if [ "$(gh api "repos/$GITHUB_REPOSITORY/releases/$RELEASE_ID" --jq '.draft')" = "true" ]; then
             gh api -X PATCH "repos/$GITHUB_REPOSITORY/releases/$RELEASE_ID" -F draft=false
           fi
@@ -153,6 +200,7 @@ jobs:
           GH_TOKEN: ${{ github.token }}
           RELEASE_ID: ${{ needs.prepare.outputs.release_id }}
         run: |
+          set -euo pipefail
           assets="$(gh api "repos/$GITHUB_REPOSITORY/releases/$RELEASE_ID/assets" --jq 'length')"
           if [ "$assets" -eq 0 ]; then
             echo "::error::Aucun artefact n'a été publié : la release reste en brouillon."
@@ -160,13 +208,13 @@ jobs:
           fi
           gh api -X PATCH "repos/$GITHUB_REPOSITORY/releases/$RELEASE_ID" -F draft=false
 
-  # Pas de workflow `on: release` : une publication par GITHUB_TOKEN ne le lancerait pas
   notify:
     name: Annoncer sur Discord
     needs: [prepare, publish]
     runs-on: ubuntu-24.04
     steps:
       - name: Envoyer les notes sur le salon
+        continue-on-error: true
         shell: bash
         env:
           GH_TOKEN: ${{ github.token }}
@@ -174,12 +222,16 @@ jobs:
           DISCORD_WEBHOOK_URL: ${{ secrets.DISCORD_WEBHOOK_URL }}
           IMAGE_URL: https://raw.githubusercontent.com/PierideApp/Pieride/main/.github/assets/changelog.png
         run: |
-          : "${DISCORD_WEBHOOK_URL:?Ajoute le secret DISCORD_WEBHOOK_URL au dépôt}"
+          set -euo pipefail
+          if [ -z "${DISCORD_WEBHOOK_URL:-}" ]; then
+            echo "DISCORD_WEBHOOK_URL absent : annonce ignorée."
+            exit 0
+          fi
           payload="$(gh api "repos/$GITHUB_REPOSITORY/releases/$RELEASE_ID" | jq '
             ((.name | select(. != "")) // .tag_name) as $titre
-            | ["\n" + (.body // "" | gsub("\r"; "")) | splits("\n(?=### )") | trim] as $blocs
+            | (("\n" + (.body // "" | gsub("\r"; ""))) | [splits("\n(?=### )")] | map(gsub("^\\s+|\\s+$"; ""))) as $blocs
             | [
-                { type: 10, content: ("## \($titre)\n\($blocs[0])" | trim) },
+                { type: 10, content: ("## \($titre)\n\($blocs[0])" | gsub("^\\s+|\\s+$"; "")) },
                 { type: 14, divider: true, spacing: 1 },
                 ($blocs[1:][] | { type: 10, content: . }),
                 { type: 14, divider: true, spacing: 1 },
