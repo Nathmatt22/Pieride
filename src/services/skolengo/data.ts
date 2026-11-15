@@ -6,6 +6,7 @@ import {
   type AttendanceItem,
   AttendanceItemState,
   AttendanceItemType,
+  DecodePayload,
   type Grade as SkolengoGrade,
   type Lesson,
   type News as SkolengoNews,
@@ -47,6 +48,26 @@ const SKOLENGO_API = "https://api.skolengo.com/api/v1/bff-sko-app";
 /** Le jeton est protégé dans les types du SDK, mais public à l'exécution. */
 const accessTokenOf = (client: SkolengoClient) =>
   (client as unknown as { accessToken?: string }).accessToken;
+
+/**
+ * L'identifiant élève attendu par `/absence-files` est celui du jeton (`sub`), comme le
+ * fait scolengo-api ; celui du profil (`userId`) est refusé (403) par certaines instances.
+ * Repli sur le profil si le jeton n'est pas un JWT lisible.
+ */
+const studentIdOf = (client: SkolengoClient) => {
+  const token = accessTokenOf(client);
+  if (token) {
+    try {
+      const sub = (DecodePayload(token) as { sub?: unknown }).sub;
+      if (typeof sub === "string" && sub) {
+        return sub;
+      }
+    } catch {
+      // Jeton opaque : on garde l'identifiant du profil.
+    }
+  }
+  return client.userId;
+};
 
 interface RawResource {
   id?: unknown;
@@ -332,32 +353,19 @@ export async function getAttendanceItems(
     "X-Skolengo-School-Id": client.school.id,
     "X-Skolengo-Ems-Code": client.school.emsCode,
   };
-  /** Certaines instances refusent le filtre élève (403) : on réessaie sans lui. */
-  let filtered = true;
+  const studentId = studentIdOf(client);
   for (let page = 0; page < ATTENDANCE_MAX_PAGES; page++) {
     const query = new URLSearchParams({
-      ...(filtered ? { "filter[student.id]": client.userId } : {}),
+      "filter[student.id]": studentId,
       include:
         "currentState,currentState.absenceReason,currentState.absenceRecurrence",
       "page[limit]": String(ATTENDANCE_PAGE),
       "page[offset]": String(page * ATTENDANCE_PAGE),
     });
-    const request = () =>
-      fetch(`${SKOLENGO_API}/absence-files?${query}`, {
-        headers,
-        credentials: "omit",
-      });
-    let response = await request();
-    if (response.status === 403 && filtered) {
-      log(
-        "warn",
-        "skolengo",
-        "Absences : 403 avec le filtre élève, nouvel essai sans filtre"
-      );
-      filtered = false;
-      query.delete("filter[student.id]");
-      response = await request();
-    }
+    const response = await fetch(`${SKOLENGO_API}/absence-files?${query}`, {
+      headers,
+      credentials: "omit",
+    });
     if (!response.ok) {
       // De quoi distinguer un droit absent (403) d'une panne (5xx), et savoir si
       // l'établissement a souscrit au module absences (`ABS`).
