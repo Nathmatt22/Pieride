@@ -1,12 +1,12 @@
 // Données Skolengo vers les modèles communs : emploi du temps, devoirs, notes, actualités et
 // absences, d'après services/skolengo de Papillon (GPLv3). Les types sont ceux de skolengojs.
+import { Buffer } from "buffer";
 import {
   type Assignment,
   type Attachment as SkolengoAttachment,
   type AttendanceItem,
   AttendanceItemState,
   AttendanceItemType,
-  DecodePayload,
   type Grade as SkolengoGrade,
   type Lesson,
   type News as SkolengoNews,
@@ -50,24 +50,40 @@ const accessTokenOf = (client: SkolengoClient) =>
   (client as unknown as { accessToken?: string }).accessToken;
 
 /**
- * L'identifiant élève attendu par `/absence-files` est celui du jeton (`sub`), comme le
- * fait scolengo-api ; celui du profil (`userId`) est refusé (403) par certaines instances.
- * Repli sur le profil si le jeton n'est pas un JWT lisible.
+ * Les identifiants élève que `/absence-files` peut attendre : celui du profil et le `sub`
+ * du jeton. Le second n'est pas toujours le même (le `sub` est un identifiant de compte),
+ * et un 403 sur l'un ne dit pas lequel est le bon : on essaie les deux.
  */
-const studentIdOf = (client: SkolengoClient) => {
+function studentIdsOf(
+  client: SkolengoClient
+): { id: string; source: string }[] {
+  const candidates = [{ id: client.userId, source: "profil" }];
   const token = accessTokenOf(client);
   if (token) {
     try {
-      const sub = (DecodePayload(token) as { sub?: unknown }).sub;
-      if (typeof sub === "string" && sub) {
-        return sub;
+      const part = token.split(".")[1];
+      if (part) {
+        // `base64url` (JWT), ramené à `base64` pour `Buffer`.
+        const claims = JSON.parse(
+          Buffer.from(
+            part.replace(/-/g, "+").replace(/_/g, "/"),
+            "base64"
+          ).toString("utf8")
+        ) as { sub?: unknown };
+        if (
+          typeof claims.sub === "string" &&
+          claims.sub &&
+          claims.sub !== client.userId
+        ) {
+          candidates.push({ id: claims.sub, source: "jeton" });
+        }
       }
     } catch {
-      // Jeton opaque : on garde l'identifiant du profil.
+      // Jeton opaque : seul l'identifiant du profil est disponible.
     }
   }
-  return client.userId;
-};
+  return candidates;
+}
 
 interface RawResource {
   id?: unknown;
@@ -353,19 +369,40 @@ export async function getAttendanceItems(
     "X-Skolengo-School-Id": client.school.id,
     "X-Skolengo-Ems-Code": client.school.emsCode,
   };
-  const studentId = studentIdOf(client);
+  const candidates = studentIdsOf(client);
+  let candidate = 0;
   for (let page = 0; page < ATTENDANCE_MAX_PAGES; page++) {
     const query = new URLSearchParams({
-      "filter[student.id]": studentId,
+      "filter[student.id]": candidates[candidate]!.id,
       include:
         "currentState,currentState.absenceReason,currentState.absenceRecurrence",
       "page[limit]": String(ATTENDANCE_PAGE),
       "page[offset]": String(page * ATTENDANCE_PAGE),
     });
-    const response = await fetch(`${SKOLENGO_API}/absence-files?${query}`, {
-      headers,
-      credentials: "omit",
-    });
+    const request = () =>
+      fetch(`${SKOLENGO_API}/absence-files?${query}`, {
+        headers,
+        credentials: "omit",
+      });
+    let response = await request();
+    if (response.status === 403 && candidate + 1 < candidates.length) {
+      const refused = candidates[candidate]!.source;
+      candidate += 1;
+      log(
+        "warn",
+        "skolengo",
+        `Absences : 403 avec l'identifiant du ${refused}, nouvel essai avec celui du ${candidates[candidate]!.source}`
+      );
+      query.set("filter[student.id]", candidates[candidate]!.id);
+      response = await request();
+    }
+    if (page === 0 && candidate > 0 && response.ok) {
+      log(
+        "info",
+        "skolengo",
+        `Absences : identifiant du ${candidates[candidate]!.source} accepté`
+      );
+    }
     if (!response.ok) {
       // De quoi distinguer un droit absent (403) d'une panne (5xx), et savoir si
       // l'établissement a souscrit au module absences (`ABS`).
