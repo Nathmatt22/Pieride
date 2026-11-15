@@ -248,6 +248,125 @@ const lessonIdOf = (courseId: string) => {
   return at > 0 ? courseId.slice(0, at) : courseId;
 };
 
+/** Le nombre d'absences demandées par page : le serveur en renvoie 20 au plus. */
+const ATTENDANCE_PAGE = 20;
+/** Au-delà, on s'arrête : un élève n'a pas 500 absences dans l'année. */
+const ATTENDANCE_MAX_PAGES = 25;
+
+/** Une date d'un fichier d'absence, ou une date invalide (filtrée par `validAttendance`). */
+const dateOf = (value: unknown) =>
+  new Date(typeof value === "string" ? value : "");
+
+/**
+ * Une entrée de `/absence-files`, avec son état courant et son motif. Le type `CLATENESS`
+ * (retard de cours) de certaines instances est ramené à un retard, et `LOCKED` (dossier
+ * traité) à une absence justifiée.
+ */
+function attendanceOf(
+  file: RawResource,
+  included: readonly RawResource[]
+): AttendanceItem | undefined {
+  if (typeof file.id !== "string" || !file.id) {
+    return undefined;
+  }
+  const stateId = refs(file.relationships?.currentState)[0]?.id;
+  const state = stateId
+    ? (included.find(resource => resource.id === stateId) ?? undefined)
+    : undefined;
+  const reasonId = refs(state?.relationships?.absenceReason)[0]?.id;
+  const reason = reasonId
+    ? included.find(resource => resource.id === reasonId)
+    : undefined;
+  const type = String(field(state ?? file, "absenceType") ?? "ABSENCE")
+    .toUpperCase()
+    .includes("LATENESS")
+    ? AttendanceItemType.LATENESS
+    : AttendanceItemType.ABSENCE;
+  const status = String(
+    field(state ?? file, "absenceFileStatus") ?? "OPEN"
+  ).toUpperCase();
+  return {
+    id: file.id,
+    creationDate: dateOf(field(state ?? file, "creationDateTime")),
+    startDate: dateOf(field(state ?? file, "absenceStartDateTime")),
+    endDate: dateOf(field(state ?? file, "absenceEndDateTime")),
+    type,
+    state:
+      status === "LOCKED"
+        ? AttendanceItemState.LOCKED
+        : AttendanceItemState.OPEN,
+    reason:
+      text(field(reason ?? {}, "longLabel")) ??
+      text(field(reason ?? {}, "shortLabel")) ??
+      text(field(reason ?? {}, "label")) ??
+      text(field(reason ?? {}, "code")) ??
+      "",
+  };
+}
+
+/**
+ * Toutes les absences et retards de l'élève, page par page. Le SDK s'arrête à la première
+ * page (20 éléments) : les plus anciennes disparaîtraient au fil de l'année.
+ */
+export async function getAttendanceItems(
+  client: SkolengoClient
+): Promise<AttendanceItem[]> {
+  await client.refreshAccessToken();
+  const token = accessTokenOf(client);
+  if (!token) {
+    throw new ServiceUnavailable("Session Skolengo sans jeton");
+  }
+  const found = new Map<string, AttendanceItem>();
+  for (let page = 0; page < ATTENDANCE_MAX_PAGES; page++) {
+    const query = new URLSearchParams({
+      "filter[student.id]": client.userId,
+      include:
+        "currentState,currentState.absenceReason,currentState.absenceRecurrence",
+      "page[limit]": String(ATTENDANCE_PAGE),
+      "page[offset]": String(page * ATTENDANCE_PAGE),
+    });
+    const response = await fetch(`${SKOLENGO_API}/absence-files?${query}`, {
+      headers: {
+        Accept: "application/vnd.api+json",
+        Authorization: `Bearer ${token}`,
+        "X-Skolengo-Date-Format": "utc",
+        "X-Skolengo-School-Id": client.school.id,
+        "X-Skolengo-Ems-Code": client.school.emsCode,
+      },
+      credentials: "omit",
+    });
+    if (!response.ok) {
+      throw new Error(`${response.status}: Skolengo`);
+    }
+    const body = (await response.json()) as {
+      data?: unknown;
+      included?: unknown;
+      meta?: { page?: { total?: number }; total?: number };
+    };
+    const files = resourceList(body.data).filter(
+      file => file.type === undefined || file.type === "absenceFile"
+    );
+    const included = resourceList(body.included);
+    let added = 0;
+    for (const file of files) {
+      const item = attendanceOf(file, included);
+      if (item && !found.has(item.id)) {
+        found.set(item.id, item);
+        added += 1;
+      }
+    }
+    const total = body.meta?.page?.total ?? body.meta?.total;
+    if (
+      added === 0 ||
+      files.length < ATTENDANCE_PAGE ||
+      (typeof total === "number" && found.size >= total)
+    ) {
+      break;
+    }
+  }
+  return [...found.values()];
+}
+
 /** Une absence sans dates exploitables ne doit pas faire échouer l'enregistrement des autres. */
 const validAttendance = (item: AttendanceItem) => {
   const start = item.startDate.getTime();
@@ -538,15 +657,11 @@ export function capabilities(
 
   const attendance: CapabilityMethods["ATTENDANCE"] = {
     getAttendancePeriods: async () => {
-      attendanceItems = await session.run(client =>
-        client.GetAttendanceItems()
-      );
+      attendanceItems = await session.run(getAttendanceItems);
       return [attendancePeriod(attendanceItems)];
     },
     getAttendanceForPeriod: async period => {
-      attendanceItems ??= await session.run(client =>
-        client.GetAttendanceItems()
-      );
+      attendanceItems ??= await session.run(getAttendanceItems);
       return attendanceItems
         .filter(validAttendance)
         .filter(

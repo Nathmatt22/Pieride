@@ -316,18 +316,68 @@ describe("absence et retard", () => {
   });
 
   it("reste disponible sans droit annoncé et ignore les dates invalides", async () => {
-    const valid = item({});
-    const invalid = item({
-      id: "ESKO-A-INVALIDE",
-      startDate: new Date(""),
-      endDate: new Date(""),
+    const file = (id: string, start: string, end: string) => ({
+      data: [
+        {
+          type: "absenceFile",
+          id,
+          relationships: {
+            currentState: {
+              data: { type: "absenceFileState", id: `state-${id}` },
+            },
+          },
+        },
+      ],
+      included: [
+        {
+          type: "absenceFileState",
+          id: `state-${id}`,
+          attributes: {
+            creationDateTime: start,
+            absenceStartDateTime: start,
+            absenceEndDateTime: end,
+            absenceType: "ABSENCE",
+            absenceFileStatus: "OPEN",
+          },
+        },
+      ],
     });
+    const valid = file(
+      "ESKO-A-1",
+      "2026-11-09T08:00:00Z",
+      "2026-11-09T09:00:00Z"
+    );
+    const invalid = file("ESKO-A-INVALIDE", "", "");
+    const body = {
+      data: [...valid.data, ...invalid.data],
+      included: [...valid.included, ...invalid.included],
+      meta: { page: { total: 2 } },
+    };
+    vi.stubGlobal(
+      "fetch",
+      vi.fn(
+        async () =>
+          new Response(JSON.stringify(body), {
+            status: 200,
+            headers: { "Content-Type": "application/vnd.api+json" },
+          })
+      )
+    );
     const session = {
       run: async <T>(
         request: (client: {
-          GetAttendanceItems: () => Promise<AttendanceItem[]>;
+          accessToken: string;
+          userId: string;
+          school: { id: string; emsCode: string };
+          refreshAccessToken: () => Promise<boolean>;
         }) => Promise<T>
-      ) => request({ GetAttendanceItems: async () => [valid, invalid] }),
+      ) =>
+        request({
+          accessToken: "token",
+          userId: "student",
+          school: { id: "school", emsCode: "ems" },
+          refreshAccessToken: async () => false,
+        }),
     } as unknown as SkolengoSession;
     const methods = capabilities(session, []).ATTENDANCE;
 
@@ -337,6 +387,7 @@ describe("absence et retard", () => {
     expect(
       (await methods!.getAttendanceForPeriod(period!)).map(({ id }) => id)
     ).toEqual(["ESKO-A-1"]);
+    vi.unstubAllGlobals();
   });
 
   it("couvre les absences reçues, ou l'année scolaire sans aucune", () => {
