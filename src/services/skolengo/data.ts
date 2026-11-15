@@ -205,8 +205,9 @@ export async function getCourseContents(
   const response = await fetch(
     `${SKOLENGO_API}/lessons/${encodeURIComponent(lessonId)}?${query}`,
     {
+      // Mêmes en-têtes que le SDK, qui n'envoie pas d'`Accept` : un serveur strict
+      // répond 406 à `application/vnd.api+json`.
       headers: {
-        Accept: "application/vnd.api+json",
         Authorization: `Bearer ${token}`,
         "X-Skolengo-Date-Format": "utc",
         "X-Skolengo-School-Id": client.school.id,
@@ -273,23 +274,27 @@ function attendanceOf(
   const state = stateId
     ? (included.find(resource => resource.id === stateId) ?? undefined)
     : undefined;
-  const reasonId = refs(state?.relationships?.absenceReason)[0]?.id;
+  const reasonId =
+    refs(state?.relationships?.absenceReason)[0]?.id ??
+    refs(file.relationships?.absenceReason)[0]?.id;
   const reason = reasonId
     ? included.find(resource => resource.id === reasonId)
     : undefined;
-  const type = String(field(state ?? file, "absenceType") ?? "ABSENCE")
+  // Les dates et le type sont sur le fichier, l'état courant porte le statut : chaque
+  // attribut est cherché sur l'état puis sur le fichier, comme le fait scolengo-api.
+  const attribute = (key: string) =>
+    field(state ?? {}, key) ?? field(file, key);
+  const type = String(attribute("absenceType") ?? "ABSENCE")
     .toUpperCase()
     .includes("LATENESS")
     ? AttendanceItemType.LATENESS
     : AttendanceItemType.ABSENCE;
-  const status = String(
-    field(state ?? file, "absenceFileStatus") ?? "OPEN"
-  ).toUpperCase();
+  const status = String(attribute("absenceFileStatus") ?? "OPEN").toUpperCase();
   return {
     id: file.id,
-    creationDate: dateOf(field(state ?? file, "creationDateTime")),
-    startDate: dateOf(field(state ?? file, "absenceStartDateTime")),
-    endDate: dateOf(field(state ?? file, "absenceEndDateTime")),
+    creationDate: dateOf(attribute("creationDateTime")),
+    startDate: dateOf(attribute("absenceStartDateTime")),
+    endDate: dateOf(attribute("absenceEndDateTime")),
     type,
     state:
       status === "LOCKED"
@@ -316,6 +321,10 @@ export async function getAttendanceItems(
   if (!token) {
     throw new ServiceUnavailable("Session Skolengo sans jeton");
   }
+  if (!client.permissions?.includes(Permissions.READ_ABSENCE_FILES)) {
+    // L'établissement ne partage peut-être pas les absences : le 403 qui suit le confirme.
+    log("warn", "skolengo", "Absences : droit READ_ABSENCE_FILES absent");
+  }
   const found = new Map<string, AttendanceItem>();
   for (let page = 0; page < ATTENDANCE_MAX_PAGES; page++) {
     const query = new URLSearchParams({
@@ -327,7 +336,6 @@ export async function getAttendanceItems(
     });
     const response = await fetch(`${SKOLENGO_API}/absence-files?${query}`, {
       headers: {
-        Accept: "application/vnd.api+json",
         Authorization: `Bearer ${token}`,
         "X-Skolengo-Date-Format": "utc",
         "X-Skolengo-School-Id": client.school.id,
@@ -336,13 +344,21 @@ export async function getAttendanceItems(
       credentials: "omit",
     });
     if (!response.ok) {
+      // Le statut seul : de quoi distinguer un droit absent (403) d'une panne (5xx).
+      log("warn", "skolengo", `Absences : HTTP ${response.status}`);
       throw new Error(`${response.status}: Skolengo`);
     }
-    const body = (await response.json()) as {
+    let body: {
       data?: unknown;
       included?: unknown;
       meta?: { page?: { total?: number }; total?: number };
     };
+    try {
+      body = await response.json();
+    } catch (error) {
+      log("warn", "skolengo", "Absences : réponse illisible");
+      throw error;
+    }
     const files = resourceList(body.data).filter(
       file => file.type === undefined || file.type === "absenceFile"
     );
@@ -662,8 +678,15 @@ export function capabilities(
     },
     getAttendanceForPeriod: async period => {
       attendanceItems ??= await session.run(getAttendanceItems);
-      return attendanceItems
-        .filter(validAttendance)
+      const valid = attendanceItems.filter(validAttendance);
+      if (valid.length < attendanceItems.length) {
+        log(
+          "warn",
+          "skolengo",
+          `Absences : ${attendanceItems.length - valid.length} sans dates exploitables`
+        );
+      }
+      return valid
         .filter(
           item => item.startDate >= period.start && item.startDate <= period.end
         )

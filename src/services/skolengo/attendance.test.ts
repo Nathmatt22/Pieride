@@ -11,6 +11,7 @@ const client = () =>
   ({
     accessToken: "token",
     userId: "student",
+    permissions: [],
     school: { id: "school", emsCode: "ems" },
     refreshAccessToken: vi.fn(async () => false),
   }) as unknown as Skolengo;
@@ -92,6 +93,55 @@ describe("getAttendanceItems", () => {
     expect(items.find(item => item.id === "absence-0")).toMatchObject({
       type: AttendanceItemType.ABSENCE,
       state: AttendanceItemState.OPEN,
+    });
+  });
+
+  it("lit les dates sur le fichier quand l'état ne les porte pas", async () => {
+    vi.stubGlobal(
+      "fetch",
+      vi.fn(
+        async () =>
+          new Response(
+            JSON.stringify({
+              data: [
+                {
+                  type: "absenceFile",
+                  id: "absence-1",
+                  attributes: {
+                    creationDateTime: "2026-11-09T07:00:00Z",
+                    absenceStartDateTime: "2026-11-09T08:00:00Z",
+                    absenceEndDateTime: "2026-11-09T10:00:00Z",
+                    absenceType: "ABSENCE",
+                    absenceFileStatus: "LOCKED",
+                  },
+                  relationships: {
+                    currentState: {
+                      data: { type: "absenceFileState", id: "state-1" },
+                    },
+                  },
+                },
+              ],
+              included: [
+                { type: "absenceFileState", id: "state-1", attributes: {} },
+              ],
+              meta: { page: { total: 1 } },
+            }),
+            {
+              status: 200,
+              headers: { "Content-Type": "application/vnd.api+json" },
+            }
+          )
+      )
+    );
+
+    const [item] = await getAttendanceItems(client());
+
+    expect(item).toMatchObject({
+      id: "absence-1",
+      type: AttendanceItemType.ABSENCE,
+      state: AttendanceItemState.LOCKED,
+      startDate: new Date("2026-11-09T08:00:00Z"),
+      endDate: new Date("2026-11-09T10:00:00Z"),
     });
   });
 

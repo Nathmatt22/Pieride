@@ -368,6 +368,7 @@ describe("absence et retard", () => {
         request: (client: {
           accessToken: string;
           userId: string;
+          permissions: readonly Permissions[];
           school: { id: string; emsCode: string };
           refreshAccessToken: () => Promise<boolean>;
         }) => Promise<T>
@@ -375,6 +376,7 @@ describe("absence et retard", () => {
         request({
           accessToken: "token",
           userId: "student",
+          permissions: [],
           school: { id: "school", emsCode: "ems" },
           refreshAccessToken: async () => false,
         }),
