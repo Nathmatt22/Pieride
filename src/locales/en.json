@@ -238,6 +238,7 @@
     "contents": "Lesson content",
     "homeworkForCourse": "Due for this class",
     "noHomeworkForCourse": "Nothing due for this class.",
+    "homeworkForSubject": "Homework for this subject",
     "homeworkTomorrow": "Due tomorrow",
     "homeworkFor": "Due {{day}}",
     "noHomework": "Nothing due that day.",

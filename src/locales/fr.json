@@ -238,6 +238,7 @@
     "contents": "Contenu du cours",
     "homeworkForCourse": "À faire pour ce cours",
     "noHomeworkForCourse": "Rien à rendre pour ce cours.",
+    "homeworkForSubject": "Cahier de texte de la matière",
     "homeworkTomorrow": "À faire pour demain",
     "homeworkFor": "À faire pour {{day}}",
     "noHomework": "Rien à faire pour ce jour-là.",

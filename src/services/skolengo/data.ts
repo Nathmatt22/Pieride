@@ -10,6 +10,7 @@ import {
   type Lesson,
   type News as SkolengoNews,
   Permissions,
+  type Skolengo as SkolengoClient,
   type Subject as SkolengoSubject,
 } from "skolengojs";
 
@@ -20,6 +21,7 @@ import type {
   Attachment,
   Attendance,
   Course,
+  CourseContent,
   Grade,
   Homework,
   News,
@@ -38,6 +40,143 @@ const positive = (value: number | undefined) => {
 };
 
 const joined = (names: readonly string[]) => names.join(", ") || undefined;
+
+const SKOLENGO_API = "https://api.skolengo.com/api/v1/bff-sko-app";
+
+/** Le jeton est protégé dans les types du SDK, mais public à l'exécution. */
+const accessTokenOf = (client: SkolengoClient) =>
+  (client as unknown as { accessToken?: string }).accessToken;
+
+interface RawResource {
+  id?: unknown;
+  attributes?: Record<string, unknown>;
+  relationships?: Record<string, unknown>;
+}
+
+interface RawRef {
+  id: string;
+}
+
+const isRef = (value: unknown): value is RawRef =>
+  typeof value === "object" &&
+  value !== null &&
+  typeof (value as { id?: unknown }).id === "string";
+
+/** Les identifiants d'une relation JSON:API, simple ou multiple. */
+const refs = (relationship: unknown): RawRef[] => {
+  const data = (relationship as { data?: unknown } | undefined)?.data;
+  if (Array.isArray(data)) {
+    return data.filter(isRef);
+  }
+  return isRef(data) ? [data] : [];
+};
+
+const text = (value: unknown) =>
+  typeof value === "string" && value.trim() ? value : undefined;
+
+/**
+ * Le cahier de textes d'une leçon, tel que `/lessons/{id}` le renvoie : un contenu HTML,
+ * ou un lien, avec ses pièces jointes. Les ressources sont retrouvées par leur identifiant,
+ * sans dépendre du nom que Skolengo donne à leur type JSON:API.
+ */
+export function toCourseContents(
+  payload: unknown,
+  lessonId: string
+): CourseContent[] {
+  const body = payload as {
+    data?: { relationships?: Record<string, unknown> };
+    included?: unknown;
+  };
+  const included = Array.isArray(body?.included)
+    ? body.included.filter(
+        (item): item is RawResource => typeof item === "object" && item !== null
+      )
+    : [];
+  const resources = new Map(
+    included.flatMap(item =>
+      typeof item.id === "string" ? [[item.id, item] as const] : []
+    )
+  );
+
+  return refs(body?.data?.relationships?.contents).flatMap(({ id }) => {
+    const content = resources.get(id);
+    if (!content) {
+      return [];
+    }
+    const title = text(content.attributes?.title);
+    const description = text(content.attributes?.html);
+    const link = text(content.attributes?.url);
+    const attachments: Attachment[] = refs(
+      content.relationships?.attachments
+    ).flatMap(({ id: attachmentId }) => {
+      const attachment = resources.get(attachmentId);
+      const url = text(attachment?.attributes?.url);
+      if (!attachment || !url) {
+        return [];
+      }
+      return [
+        {
+          kind: "file",
+          name:
+            text(attachment.attributes?.name) ??
+            text(attachment.attributes?.fileName) ??
+            text(attachment.attributes?.alternativeText) ??
+            "Pièce jointe",
+          url,
+          ref: JSON.stringify({ source: "lesson", id: lessonId, url }),
+        },
+      ];
+    });
+    if (link) {
+      attachments.push({
+        kind: "link",
+        name: title ?? link,
+        url: link,
+      });
+    }
+    if (!title && !description && attachments.length === 0) {
+      return [];
+    }
+    return [{ title, description, category: undefined, attachments }];
+  });
+}
+
+/** Le détail d'une leçon, demandé seulement quand l'élève ouvre le cours. */
+export async function getCourseContents(
+  client: SkolengoClient,
+  lessonId: string
+): Promise<CourseContent[]> {
+  const token = accessTokenOf(client);
+  if (!token) {
+    throw new ServiceUnavailable("Session Skolengo sans jeton");
+  }
+  const query = new URLSearchParams({
+    include: "contents,contents.attachments",
+    "filter[student.id]": client.userId,
+  });
+  const response = await fetch(
+    `${SKOLENGO_API}/lessons/${encodeURIComponent(lessonId)}?${query}`,
+    {
+      headers: {
+        Authorization: `Bearer ${token}`,
+        "X-Skolengo-Date-Format": "utc",
+        "X-Skolengo-School-Id": client.school.id,
+        "X-Skolengo-Ems-Code": client.school.emsCode,
+      },
+      credentials: "omit",
+    }
+  );
+  if (!response.ok) {
+    throw new Error(`${response.status}: Skolengo`);
+  }
+  return toCourseContents(await response.json(), lessonId);
+}
+
+/** L'identifiant de la leçon dans celui d'un cours (`<leçon>@<début>`). */
+const lessonIdOf = (courseId: string) => {
+  const at = courseId.lastIndexOf("@");
+  return at > 0 ? courseId.slice(0, at) : courseId;
+};
 
 /** Une absence sans dates exploitables ne doit pas faire échouer l'enregistrement des autres. */
 const validAttendance = (item: AttendanceItem) => {
@@ -270,6 +409,8 @@ export function capabilities(
           .flatMap(day => day.lessons.map(toCourse))
           .filter(course => course.from >= weekStart && course.from < to);
       }),
+    getCourseContents: courseId =>
+      session.run(client => getCourseContents(client, lessonIdOf(courseId))),
   };
 
   const homework: CapabilityMethods["HOMEWORK"] = {

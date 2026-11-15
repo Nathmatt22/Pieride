@@ -11,11 +11,14 @@ import { addDays } from "@/lib/week";
 
 import { ServiceUnavailable } from "../shared/errors";
 import type { Attachment } from "../shared/models";
+import { getCourseContents } from "./data";
 import type { SkolengoSession } from "./session";
 
 /** Où retrouver une pièce jointe pour en redemander le contenu. */
 type Origin =
-  { source: "homework"; id: string } | { source: "news"; id: string };
+  | { source: "homework"; id: string }
+  | { source: "news"; id: string }
+  | { source: "lesson"; id: string; url: string };
 
 /** La `ref` d'une pièce jointe, ou `null` si elle est illisible. */
 export function parseRef(ref: string | undefined): Origin | null {
@@ -28,9 +31,19 @@ export function parseRef(ref: string | undefined): Origin | null {
   if (typeof value !== "object" || value === null) {
     return null;
   }
-  const { source, id } = value as { source?: unknown; id?: unknown };
-  return typeof id === "string" && (source === "homework" || source === "news")
-    ? { source, id }
+  const { source, id, url } = value as {
+    source?: unknown;
+    id?: unknown;
+    url?: unknown;
+  };
+  if (typeof id !== "string") {
+    return null;
+  }
+  if (source === "homework" || source === "news") {
+    return { source, id };
+  }
+  return source === "lesson" && typeof url === "string"
+    ? { source, id, url }
     : null;
 }
 
@@ -65,11 +78,51 @@ async function findFile(
   );
 }
 
+/** Le contenu d'une pièce jointe d'un cours, avec le jeton de la session. */
+async function downloadLessonFile(
+  client: SkolengoClient,
+  ref: Extract<Origin, { source: "lesson" }>,
+  name: string,
+  url: string
+): Promise<Uint8Array> {
+  const contents = await getCourseContents(client, ref.id);
+  const file = contents
+    .flatMap(content => content.attachments)
+    .find(
+      candidate =>
+        candidate.kind === "file" &&
+        (candidate.url === url || candidate.name === name)
+    );
+  if (!file) {
+    throw new ServiceUnavailable("Pièce jointe introuvable chez Skolengo");
+  }
+  try {
+    await allowInstance(new URL(file.url).origin);
+  } catch {
+    throw new ServiceUnavailable("Pièce jointe introuvable chez Skolengo");
+  }
+  const token = (client as unknown as { accessToken?: string }).accessToken;
+  if (!token) {
+    throw new ServiceUnavailable("Session Skolengo sans jeton");
+  }
+  const response = await fetch(file.url, {
+    headers: { Authorization: `Bearer ${token}` },
+    credentials: "omit",
+  });
+  if (!response.ok) {
+    throw new Error(`${response.status}: Skolengo`);
+  }
+  return new Uint8Array(await response.arrayBuffer());
+}
+
 /** Le contenu d'une pièce jointe, retrouvée là où elle a été vue. */
 export const downloadAttachment =
   (session: SkolengoSession) => (attachment: Attachment) =>
     session.run(async client => {
       const ref = parseRef(attachment.ref);
+      if (ref?.source === "lesson") {
+        return downloadLessonFile(client, ref, attachment.name, attachment.url);
+      }
       const file =
         ref && (await findFile(client, ref, attachment.name, attachment.url));
       if (!file) {

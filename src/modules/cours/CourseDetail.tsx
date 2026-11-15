@@ -1,7 +1,7 @@
 // Détail d'un cours dans le panneau de droite (maquette 03-cours/02-semaine-detail-cours) : le
 // temps restant s'il a lieu en ce moment, son statut, ses informations, le cahier de textes
 // (comme la description d'un devoir, 04-taches/02-tableau-detail), les devoirs de la matière à
-// rendre ce jour-là et l'heure de la dernière synchro de la semaine en cours.
+// rendre ce jour-là puis les autres de la semaine, et l'heure de la dernière synchro.
 import { Clock, MapPin, User } from "@getpapillon/papicons";
 import { Fragment } from "react";
 import { useTranslation } from "react-i18next";
@@ -10,6 +10,7 @@ import { AttachmentList } from "@/components/AttachmentList/AttachmentList";
 import { Card } from "@/components/Card/Card";
 import { Section } from "@/components/Section/Section";
 import { SettingRow } from "@/components/SettingRow/SettingRow";
+import { useCourseContents } from "@/hooks/useCourseContents";
 import { useDateFormats, useFormatDuration } from "@/hooks/useFormats";
 import { useHomework } from "@/hooks/useHomework";
 import { useServiceSync } from "@/hooks/useLastSync";
@@ -35,6 +36,7 @@ export function CourseDetail({
   const formats = useDateFormats();
   const duration = useFormatDuration();
   const homework = useHomework(accountId, course.from);
+  const contents = useCourseContents(course.serviceId, course);
   const lastSync = useServiceSync(course.serviceId, "TIMETABLE");
   const attachments = useOpenAttachment(course.serviceId);
   const length = (course.to.getTime() - course.from.getTime()) / 60_000;
@@ -47,11 +49,20 @@ export function CourseDetail({
     weekStart(course.from).getTime() === weekStart(now).getTime()
       ? lastSync.data
       : null;
-  const due = sameDay(course.from, now)
-    ? t("cours.dueToday")
-    : sameDay(course.from, addDays(now, 1))
-      ? t("cours.dueTomorrow")
-      : t("cours.dueOn", { day: formats.longDate.format(course.from) });
+  const dueLabel = (date: Date) =>
+    sameDay(date, now)
+      ? t("cours.dueToday")
+      : sameDay(date, addDays(now, 1))
+        ? t("cours.dueTomorrow")
+        : t("cours.dueOn", { day: formats.longDate.format(date) });
+  const due = dueLabel(course.from);
+  const otherHomework =
+    homework.status === "ready"
+      ? homework.data.filter(
+          item =>
+            item.subject === course.subject && !sameDay(item.dueAt, course.from)
+        )
+      : [];
 
   const row = (icon: typeof User, title: string, value: string) => (
     <SettingRow icon={icon} tone="subject" title={title} value={value} />
@@ -91,10 +102,10 @@ export function CourseDetail({
           {row(Clock, t("cours.duration"), duration(length))}
         </Card>
       </Section>
-      {course.contents && course.contents.length > 0 && (
+      {contents && contents.length > 0 && (
         <Section title={t("cours.contents")}>
           <div className={styles.contents}>
-            {course.contents.map((content, index) => (
+            {contents.map((content, index) => (
               <Fragment key={index}>
                 {(content.category || content.title || content.description) && (
                   <Card className={styles.contentCard}>
@@ -139,6 +150,17 @@ export function CourseDetail({
           )}
         </Card>
       </Section>
+      {otherHomework.length > 0 && (
+        <Section title={t("cours.homeworkForSubject")}>
+          <Card className={styles.detailCard}>
+            <HomeworkList
+              items={otherHomework}
+              empty={t("cours.noHomeworkForCourse")}
+              caption={item => dueLabel(item.dueAt)}
+            />
+          </Card>
+        </Section>
+      )}
       {synced && (
         <p className={styles.detailUpdated}>
           {t("cours.updated", {

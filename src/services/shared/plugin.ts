@@ -10,6 +10,7 @@ import type {
   CanteenMenu,
   CanteenTransaction,
   Course,
+  CourseContent,
   Homework,
   LinkedService,
   News,
@@ -20,7 +21,14 @@ import type {
 
 /** Chaque capability et les méthodes qu'un service doit fournir pour la déclarer (section 4 du schéma). */
 export interface CapabilityMethods {
-  TIMETABLE: { getWeeklyTimetable(weekStart: Date): Promise<Course[]> };
+  TIMETABLE: {
+    getWeeklyTimetable(weekStart: Date): Promise<Course[]>;
+    /**
+     * Le cahier de textes d'une séance, quand le service ne le donne pas avec l'emploi du
+     * temps. Absent : le cours n'a que ce que `getWeeklyTimetable` a fourni.
+     */
+    getCourseContents?(courseId: string): Promise<CourseContent[]>;
+  };
   HOMEWORK: {
     getHomeworks(weekStart: Date): Promise<Homework[]>;
     setHomeworkCompletion(id: string, done: boolean): Promise<void>;

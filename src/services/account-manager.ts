@@ -35,6 +35,7 @@ import type {
   Account,
   Attachment,
   Attendance,
+  CourseContent,
   LinkedService,
   News,
   ServiceKind,
@@ -452,6 +453,22 @@ export class AccountManager {
       .from(services)
       .where(eq(services.id, serviceId));
     return service && (await this.plugin(service)).capabilities.NEWS;
+  }
+
+  /** Le cahier de textes d'une séance, demandé au service à l'ouverture du cours. */
+  async courseContents(
+    serviceId: string,
+    courseId: string
+  ): Promise<CourseContent[]> {
+    const [service] = await this.db
+      .select()
+      .from(services)
+      .where(eq(services.id, serviceId));
+    if (!service) {
+      return [];
+    }
+    const methods = (await this.plugin(service)).capabilities.TIMETABLE;
+    return (await methods?.getCourseContents?.(courseId)) ?? [];
   }
 
   /**

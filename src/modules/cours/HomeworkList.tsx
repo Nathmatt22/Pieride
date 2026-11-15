@@ -18,7 +18,7 @@ export function HomeworkList({
   /** Phrase affichée quand il n'y a rien à faire. */
   empty: string;
   /** Sous la consigne, à la place du nom de la matière (« Pour demain »). */
-  caption?: string;
+  caption?: string | ((item: HomeworkView) => string);
 }) {
   const { t } = useTranslation();
   if (items.length === 0) {
@@ -43,7 +43,9 @@ export function HomeworkList({
           <span>
             <p className={styles.homeworkText}>{item.content}</p>
             <span className={styles.homeworkCaption}>
-              {caption ?? item.label}
+              {typeof caption === "function"
+                ? caption(item)
+                : (caption ?? item.label)}
             </span>
           </span>
         </li>

@@ -8,13 +8,15 @@ import {
   type News as SkolengoNews,
   Permissions,
 } from "skolengojs";
-import { describe, expect, it, vi } from "vitest";
+import { afterEach, describe, expect, it, vi } from "vitest";
 
 import {
   attendancePeriod,
   capabilities,
+  getCourseContents,
   toAttendance,
   toCourse,
+  toCourseContents,
   toHomework,
   toNews,
 } from "./data";
@@ -45,6 +47,110 @@ describe("toCourse", () => {
 
   it("signale un cours annulé", () => {
     expect(toCourse(lesson({ canceled: true })).status).toBe("canceled");
+  });
+});
+
+describe("toCourseContents", () => {
+  it("reprend le HTML et rattache les pièces jointes de la leçon", () => {
+    const payload = {
+      data: {
+        relationships: {
+          contents: { data: [{ id: "content-1", type: "lessonContent" }] },
+        },
+      },
+      included: [
+        {
+          id: "content-1",
+          type: "lessonContent",
+          attributes: {
+            title: "Chapitre 3",
+            html: "<p>Lire le chapitre 3.</p>",
+          },
+          relationships: {
+            attachments: {
+              data: [{ id: "file-1", type: "attachment" }],
+            },
+          },
+        },
+        {
+          id: "file-1",
+          type: "attachment",
+          attributes: {
+            name: "chapitre-3.pdf",
+            url: "https://api.skolengo.com/fichier",
+          },
+        },
+      ],
+    };
+
+    const [content] = toCourseContents(payload, "ESKO-L-1");
+
+    expect(content).toMatchObject({
+      title: "Chapitre 3",
+      description: "<p>Lire le chapitre 3.</p>",
+    });
+    expect(content?.attachments[0]).toMatchObject({
+      kind: "file",
+      name: "chapitre-3.pdf",
+      url: "https://api.skolengo.com/fichier",
+    });
+    expect(JSON.parse(content?.attachments[0]?.ref ?? "")).toEqual({
+      source: "lesson",
+      id: "ESKO-L-1",
+      url: "https://api.skolengo.com/fichier",
+    });
+  });
+
+  it("ignore une leçon sans contenu", () => {
+    expect(
+      toCourseContents({ data: { relationships: {} } }, "ESKO-L-1")
+    ).toEqual([]);
+  });
+});
+
+describe("getCourseContents", () => {
+  afterEach(() => {
+    vi.unstubAllGlobals();
+  });
+
+  it("demande le détail de la leçon avec le jeton de la session", async () => {
+    const fetchMock = vi.fn(
+      async (_input: RequestInfo | URL, _init?: RequestInit) =>
+        new Response(
+          JSON.stringify({
+            data: {
+              relationships: {
+                contents: { data: [{ id: "content-1" }] },
+              },
+            },
+            included: [
+              {
+                id: "content-1",
+                attributes: { title: "Chapitre 3" },
+              },
+            ],
+          }),
+          { status: 200 }
+        )
+    );
+    vi.stubGlobal("fetch", fetchMock);
+    const client = {
+      accessToken: "token",
+      userId: "student",
+      school: { id: "school", emsCode: "ems" },
+    } as unknown as Parameters<typeof getCourseContents>[0];
+
+    const contents = await getCourseContents(client, "ESKO-L-1");
+
+    const [input, init] = fetchMock.mock.calls[0] ?? [];
+    const url = decodeURIComponent(String(input));
+    expect(url).toContain("/lessons/ESKO-L-1");
+    expect(url).toContain("include=contents,contents.attachments");
+    expect(url).toContain("filter[student.id]=student");
+    expect(init).toMatchObject({
+      headers: { Authorization: "Bearer token" },
+    });
+    expect(contents).toMatchObject([{ title: "Chapitre 3" }]);
   });
 });
 
