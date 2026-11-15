@@ -145,6 +145,24 @@ describe("getAttendanceItems", () => {
     });
   });
 
+  it("réessaie sans le filtre élève quand le serveur le refuse", async () => {
+    const fetchMock = vi.fn(async (input: RequestInfo | URL) => {
+      const url = new URL(String(input));
+      return url.searchParams.has("filter[student.id]")
+        ? new Response(JSON.stringify({ errors: [{ code: "FORBIDDEN" }] }), {
+            status: 403,
+          })
+        : pageOf(["absence-1"], 1);
+    });
+    vi.stubGlobal("fetch", fetchMock);
+
+    const items = await getAttendanceItems(client());
+
+    expect(fetchMock).toHaveBeenCalledTimes(2);
+    expect(String(fetchMock.mock.calls[1]?.[0])).not.toContain("filter");
+    expect(items.map(({ id }) => id)).toEqual(["absence-1"]);
+  });
+
   it("s'arrête si le serveur renvoie toujours la même page", async () => {
     const ids = Array.from({ length: 20 }, (_, index) => `absence-${index}`);
     const fetchMock = vi.fn(async () => pageOf(ids, 40));

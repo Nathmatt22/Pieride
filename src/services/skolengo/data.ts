@@ -326,26 +326,57 @@ export async function getAttendanceItems(
     log("warn", "skolengo", "Absences : droit READ_ABSENCE_FILES absent");
   }
   const found = new Map<string, AttendanceItem>();
+  const headers = {
+    Authorization: `Bearer ${token}`,
+    "X-Skolengo-Date-Format": "utc",
+    "X-Skolengo-School-Id": client.school.id,
+    "X-Skolengo-Ems-Code": client.school.emsCode,
+  };
+  /** Certaines instances refusent le filtre élève (403) : on réessaie sans lui. */
+  let filtered = true;
   for (let page = 0; page < ATTENDANCE_MAX_PAGES; page++) {
     const query = new URLSearchParams({
-      "filter[student.id]": client.userId,
+      ...(filtered ? { "filter[student.id]": client.userId } : {}),
       include:
         "currentState,currentState.absenceReason,currentState.absenceRecurrence",
       "page[limit]": String(ATTENDANCE_PAGE),
       "page[offset]": String(page * ATTENDANCE_PAGE),
     });
-    const response = await fetch(`${SKOLENGO_API}/absence-files?${query}`, {
-      headers: {
-        Authorization: `Bearer ${token}`,
-        "X-Skolengo-Date-Format": "utc",
-        "X-Skolengo-School-Id": client.school.id,
-        "X-Skolengo-Ems-Code": client.school.emsCode,
-      },
-      credentials: "omit",
-    });
+    const request = () =>
+      fetch(`${SKOLENGO_API}/absence-files?${query}`, {
+        headers,
+        credentials: "omit",
+      });
+    let response = await request();
+    if (response.status === 403 && filtered) {
+      log(
+        "warn",
+        "skolengo",
+        "Absences : 403 avec le filtre élève, nouvel essai sans filtre"
+      );
+      filtered = false;
+      query.delete("filter[student.id]");
+      response = await request();
+    }
     if (!response.ok) {
-      // Le statut seul : de quoi distinguer un droit absent (403) d'une panne (5xx).
-      log("warn", "skolengo", `Absences : HTTP ${response.status}`);
+      // De quoi distinguer un droit absent (403) d'une panne (5xx), et savoir si
+      // l'établissement a souscrit au module absences (`ABS`).
+      const services = client.school.subscribedServices?.join(",") ?? "?";
+      log(
+        "warn",
+        "skolengo",
+        `Absences : HTTP ${response.status} (services ${services})`
+      );
+      if (response.status === 403) {
+        const detail = (await response.json().catch(() => null)) as {
+          errors?: { code?: string; title?: string }[];
+        } | null;
+        log(
+          "warn",
+          "skolengo",
+          `Absences : ${detail?.errors?.[0]?.code ?? detail?.errors?.[0]?.title ?? "sans détail"}`
+        );
+      }
       throw new Error(`${response.status}: Skolengo`);
     }
     let body: {
