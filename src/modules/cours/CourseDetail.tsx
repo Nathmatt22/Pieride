@@ -37,6 +37,7 @@ export function CourseDetail({
   const duration = useFormatDuration();
   const homework = useHomework(accountId, course.from);
   const contents = useCourseContents(course.serviceId, course);
+  const hasContents = contents.contents.length > 0;
   const lastSync = useServiceSync(course.serviceId, "TIMETABLE");
   const attachments = useOpenAttachment(course.serviceId);
   const length = (course.to.getTime() - course.from.getTime()) / 60_000;
@@ -102,29 +103,51 @@ export function CourseDetail({
           {row(Clock, t("cours.duration"), duration(length))}
         </Card>
       </Section>
-      {contents && contents.length > 0 && (
+      {contents.status !== "unsupported" && (
         <Section title={t("cours.contents")}>
-          <div className={styles.contents}>
-            {contents.map((content, index) => (
-              <Fragment key={index}>
-                {(content.category || content.title || content.description) && (
-                  <Card className={styles.contentCard}>
-                    {content.category && <small>{content.category}</small>}
-                    {content.title && <strong>{content.title}</strong>}
-                    {content.description && <p>{content.description}</p>}
-                  </Card>
-                )}
-                {content.attachments.length > 0 && (
-                  <AttachmentList
-                    attachments={content.attachments}
-                    onOpen={attachments.open}
-                    opening={attachments.opening}
-                    error={attachments.error}
-                  />
-                )}
-              </Fragment>
-            ))}
-          </div>
+          {contents.status === "loading" && (
+            <p className={styles.homeworkEmpty}>{t("cours.contentsLoading")}</p>
+          )}
+          {contents.status === "error" && (
+            <p className={styles.homeworkEmpty} role="alert">
+              {t("cours.contentsError")}{" "}
+              <button
+                type="button"
+                className={styles.contentsRetry}
+                onClick={contents.retry}
+              >
+                {t("app.retry")}
+              </button>
+            </p>
+          )}
+          {contents.status === "ready" && !hasContents && (
+            <p className={styles.homeworkEmpty}>{t("cours.contentsEmpty")}</p>
+          )}
+          {hasContents && (
+            <div className={styles.contents}>
+              {contents.contents.map((content, index) => (
+                <Fragment key={index}>
+                  {(content.category ||
+                    content.title ||
+                    content.description) && (
+                    <Card className={styles.contentCard}>
+                      {content.category && <small>{content.category}</small>}
+                      {content.title && <strong>{content.title}</strong>}
+                      {content.description && <p>{content.description}</p>}
+                    </Card>
+                  )}
+                  {content.attachments.length > 0 && (
+                    <AttachmentList
+                      attachments={content.attachments}
+                      onOpen={attachments.open}
+                      opening={attachments.opening}
+                      error={attachments.error}
+                    />
+                  )}
+                </Fragment>
+              ))}
+            </div>
+          )}
         </Section>
       )}
       <Section title={t("cours.homeworkForCourse")}>

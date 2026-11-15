@@ -455,20 +455,23 @@ export class AccountManager {
     return service && (await this.plugin(service)).capabilities.NEWS;
   }
 
-  /** Le cahier de textes d'une séance, demandé au service à l'ouverture du cours. */
+  /**
+   * Le cahier de textes d'une séance, demandé au service à l'ouverture du cours.
+   * `undefined` : ce service ne sait pas le donner (`getCourseContents` absent).
+   */
   async courseContents(
     serviceId: string,
     courseId: string
-  ): Promise<CourseContent[]> {
+  ): Promise<CourseContent[] | undefined> {
     const [service] = await this.db
       .select()
       .from(services)
       .where(eq(services.id, serviceId));
     if (!service) {
-      return [];
+      return undefined;
     }
     const methods = (await this.plugin(service)).capabilities.TIMETABLE;
-    return (await methods?.getCourseContents?.(courseId)) ?? [];
+    return methods?.getCourseContents?.(courseId);
   }
 
   /**

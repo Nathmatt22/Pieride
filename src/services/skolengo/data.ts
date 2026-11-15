@@ -14,6 +14,7 @@ import {
   type Subject as SkolengoSubject,
 } from "skolengojs";
 
+import { log } from "@/lib/log";
 import { addDays } from "@/lib/week";
 
 import { ServiceUnavailable } from "../shared/errors";
@@ -51,6 +52,7 @@ interface RawResource {
   id?: unknown;
   attributes?: Record<string, unknown>;
   relationships?: Record<string, unknown>;
+  [key: string]: unknown;
 }
 
 interface RawRef {
@@ -74,6 +76,41 @@ const refs = (relationship: unknown): RawRef[] => {
 const text = (value: unknown) =>
   typeof value === "string" && value.trim() ? value : undefined;
 
+/** Un champ d'une ressource JSON:API, ou d'une ressource déjà désérialisée. */
+const field = (resource: RawResource, key: string) =>
+  resource.attributes?.[key] ?? resource[key];
+
+/** Les ressources d'une liste JSON:API ou d'un tableau déjà désérialisé. */
+const resourceList = (value: unknown): RawResource[] => {
+  if (!Array.isArray(value)) {
+    return [];
+  }
+  return value.filter(
+    (item): item is RawResource => typeof item === "object" && item !== null
+  );
+};
+
+/** Une pièce jointe, qu'elle vienne de `included` ou qu'elle soit déjà imbriquée. */
+const fileOf = (
+  attachment: RawResource,
+  lessonId: string
+): Attachment | undefined => {
+  const url = text(field(attachment, "url"));
+  if (!url) {
+    return undefined;
+  }
+  return {
+    kind: "file",
+    name:
+      text(field(attachment, "name")) ??
+      text(field(attachment, "fileName")) ??
+      text(field(attachment, "alternativeText")) ??
+      "Pièce jointe",
+    url,
+    ref: JSON.stringify({ source: "lesson", id: lessonId, url }),
+  };
+};
+
 /**
  * Le cahier de textes d'une leçon, tel que `/lessons/{id}` le renvoie : un contenu HTML,
  * ou un lien, avec ses pièces jointes. Les ressources sont retrouvées par leur identifiant,
@@ -84,55 +121,63 @@ export function toCourseContents(
   lessonId: string
 ): CourseContent[] {
   const body = payload as {
-    data?: { relationships?: Record<string, unknown> };
+    data?: {
+      attributes?: Record<string, unknown>;
+      relationships?: Record<string, unknown>;
+      contents?: unknown;
+    };
     included?: unknown;
   };
-  const included = Array.isArray(body?.included)
-    ? body.included.filter(
-        (item): item is RawResource => typeof item === "object" && item !== null
-      )
-    : [];
+  const included = resourceList(body?.included);
   const resources = new Map(
     included.flatMap(item =>
       typeof item.id === "string" ? [[item.id, item] as const] : []
     )
   );
+  // Les identifiants de la relation, ou les contenus eux-mêmes s'ils sont déjà imbriqués.
+  const listed = refs(body?.data?.relationships?.contents);
+  const embedded = [
+    ...resourceList(body?.data?.contents),
+    ...resourceList(body?.data?.attributes?.contents),
+  ];
+  const contents = [
+    ...listed.map(
+      ({ id }) =>
+        resources.get(id) ?? embedded.find(content => content.id === id)
+    ),
+    ...embedded.filter(content => !listed.some(({ id }) => id === content.id)),
+  ];
 
-  return refs(body?.data?.relationships?.contents).flatMap(({ id }) => {
-    const content = resources.get(id);
+  return contents.flatMap(content => {
     if (!content) {
       return [];
     }
-    const title = text(content.attributes?.title);
-    const description = text(content.attributes?.html);
-    const link = text(content.attributes?.url);
-    const attachments: Attachment[] = refs(
-      content.relationships?.attachments
-    ).flatMap(({ id: attachmentId }) => {
-      const attachment = resources.get(attachmentId);
-      const url = text(attachment?.attributes?.url);
-      if (!attachment || !url) {
-        return [];
+    const title = text(field(content, "title"));
+    const description =
+      text(field(content, "html")) ??
+      text(field(content, "content")) ??
+      text(field(content, "text"));
+    const attachments: Attachment[] = [];
+    const seen = new Set<string>();
+    const add = (attachment: Attachment | undefined) => {
+      if (attachment && !seen.has(attachment.url)) {
+        seen.add(attachment.url);
+        attachments.push(attachment);
       }
-      return [
-        {
-          kind: "file",
-          name:
-            text(attachment.attributes?.name) ??
-            text(attachment.attributes?.fileName) ??
-            text(attachment.attributes?.alternativeText) ??
-            "Pièce jointe",
-          url,
-          ref: JSON.stringify({ source: "lesson", id: lessonId, url }),
-        },
-      ];
-    });
+    };
+    for (const { id } of refs(content.relationships?.attachments)) {
+      const file = resources.get(id);
+      if (file) {
+        add(fileOf(file, lessonId));
+      }
+    }
+    // Un contenu peut aussi porter ses pièces jointes déjà désérialisées.
+    for (const file of resourceList(field(content, "attachments"))) {
+      add(fileOf(file, lessonId));
+    }
+    const link = text(field(content, "url"));
     if (link) {
-      attachments.push({
-        kind: "link",
-        name: title ?? link,
-        url: link,
-      });
+      add({ kind: "link", name: title ?? link, url: link });
     }
     if (!title && !description && attachments.length === 0) {
       return [];
@@ -146,18 +191,22 @@ export async function getCourseContents(
   client: SkolengoClient,
   lessonId: string
 ): Promise<CourseContent[]> {
+  // Le jeton peut avoir expiré depuis la dernière requête du SDK : il le renouvelle lui-même.
+  await client.refreshAccessToken();
   const token = accessTokenOf(client);
   if (!token) {
     throw new ServiceUnavailable("Session Skolengo sans jeton");
   }
   const query = new URLSearchParams({
-    include: "contents,contents.attachments",
+    include:
+      "teachers,contents,contents.attachments,subject,toDoForTheLesson,toDoForTheLesson.subject,toDoAfterTheLesson,toDoAfterTheLesson.subject",
     "filter[student.id]": client.userId,
   });
   const response = await fetch(
     `${SKOLENGO_API}/lessons/${encodeURIComponent(lessonId)}?${query}`,
     {
       headers: {
+        Accept: "application/vnd.api+json",
         Authorization: `Bearer ${token}`,
         "X-Skolengo-Date-Format": "utc",
         "X-Skolengo-School-Id": client.school.id,
@@ -167,9 +216,30 @@ export async function getCourseContents(
     }
   );
   if (!response.ok) {
+    log(
+      "warn",
+      "skolengo",
+      `Cahier de texte ${lessonId} : HTTP ${response.status}`
+    );
     throw new Error(`${response.status}: Skolengo`);
   }
-  return toCourseContents(await response.json(), lessonId);
+  const payload = await response.json();
+  const contents = toCourseContents(payload, lessonId);
+  if (contents.length === 0) {
+    // De quoi savoir si Skolengo annonce un contenu (anyContent) sans l'envoyer.
+    const body = payload as {
+      data?: { attributes?: { anyContent?: unknown } };
+      included?: unknown;
+    };
+    log(
+      "warn",
+      "skolengo",
+      `Cahier de texte ${lessonId} : aucun contenu (anyContent=${String(
+        body.data?.attributes?.anyContent
+      )}, ${Array.isArray(body.included) ? body.included.length : 0} ressources incluses)`
+    );
+  }
+  return contents;
 }
 
 /** L'identifiant de la leçon dans celui d'un cours (`<leçon>@<début>`). */

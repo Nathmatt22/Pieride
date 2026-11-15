@@ -106,6 +106,38 @@ describe("toCourseContents", () => {
       toCourseContents({ data: { relationships: {} } }, "ESKO-L-1")
     ).toEqual([]);
   });
+
+  it("lit les contenus déjà imbriqués et leurs pièces jointes", () => {
+    const payload = {
+      data: {
+        contents: [
+          {
+            id: "content-1",
+            title: "Chapitre 4",
+            html: "<p>Exercices 1 à 4.</p>",
+            attachments: [
+              {
+                id: "file-1",
+                fileName: "exercices.pdf",
+                url: "https://api.skolengo.com/fichier",
+              },
+            ],
+          },
+        ],
+      },
+    };
+
+    const [content] = toCourseContents(payload, "ESKO-L-1");
+
+    expect(content).toMatchObject({
+      title: "Chapitre 4",
+      description: "<p>Exercices 1 à 4.</p>",
+    });
+    expect(content?.attachments[0]).toMatchObject({
+      kind: "file",
+      name: "exercices.pdf",
+    });
+  });
 });
 
 describe("getCourseContents", () => {
@@ -138,6 +170,7 @@ describe("getCourseContents", () => {
       accessToken: "token",
       userId: "student",
       school: { id: "school", emsCode: "ems" },
+      refreshAccessToken: vi.fn(async () => false),
     } as unknown as Parameters<typeof getCourseContents>[0];
 
     const contents = await getCourseContents(client, "ESKO-L-1");
@@ -145,7 +178,7 @@ describe("getCourseContents", () => {
     const [input, init] = fetchMock.mock.calls[0] ?? [];
     const url = decodeURIComponent(String(input));
     expect(url).toContain("/lessons/ESKO-L-1");
-    expect(url).toContain("include=contents,contents.attachments");
+    expect(url).toContain("include=teachers,contents,contents.attachments");
     expect(url).toContain("filter[student.id]=student");
     expect(init).toMatchObject({
       headers: { Authorization: "Bearer token" },
